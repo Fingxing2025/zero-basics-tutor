@@ -59,7 +59,7 @@ git clone https://github.com/Fingxing2025/zero-basics-tutor.git ~/.claude/skills
 
 ## 测试
 
-`evals/evals.json` 包含 3 个测试请求，每个请求附有可以逐条核对的检查项，例如：是否就地解释了陌生词、思考题是否附有答案、结尾是否没有提问。修改 SKILL.md 后，建议用这些测试请求检查新旧两个版本的输出。
+`evals/evals.json` 包含 4 个测试请求，每个请求附有可以逐条核对的检查项，例如：是否就地解释了陌生词、思考题是否附有答案、结尾是否没有提问。修改 SKILL.md 后，建议用这些测试请求检查新旧两个版本的输出。
 
 候选讲义的形式检查只需要 Python 3 标准库：
 
