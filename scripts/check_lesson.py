@@ -3,6 +3,8 @@
 
 Exit 0: no covered mechanical findings; 1: findings; 2: input/check error.
 The caller must still review meaning, prerequisites, coverage and continuity.
+Source excerpts between `<!-- 原文 -->` and `<!-- /原文 -->` lines are quoted
+material, not teacher prose, so wording checks skip them.
 """
 
 import argparse
@@ -11,6 +13,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 
 LABEL = re.compile(
@@ -21,6 +24,9 @@ KINDS = {
     "思考题": "question", "thinking question": "question", "thought exercise": "question",
     "分析": "analysis", "analysis": "analysis", "答案": "answer", "answer": "answer",
 }
+SOURCE_OPEN = re.compile(r"^<!--\s*(?:原文|source)\s*-->$", re.IGNORECASE)
+SOURCE_CLOSE = re.compile(r"^<!--\s*/(?:原文|source)\s*-->$", re.IGNORECASE)
+IMAGE = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)\s]+))|<img\s[^>]*src=[\"']([^\"']+)[\"']", re.IGNORECASE)
 PROGRESS = re.compile(r"^(?:【进度】|\[Progress\]|【Progress】)", re.IGNORECASE)
 BANNED = [
     ("comprehension_check", r"懂了吗|明白了吗|这样清楚吗|有哪里不懂吗|能跟上吗|注意到了吗|你发现了吗|是不是很神奇|对吧[？?]"),
@@ -42,12 +48,24 @@ def clean(line):
 
 
 def prose_lines(text):
-    """Ignore fenced literal content, but inspect Markdown quote prose."""
+    """Ignore fenced literal content and source excerpts, but inspect Markdown quote prose."""
     fence = None
     opening = None
+    excerpt = None
     result = []
+    excerpts = []
     for number, raw in enumerate(text.splitlines(), 1):
         line = re.sub(r"^\s*(?:>\s*)+", "", raw)
+        if fence is None:
+            if excerpt is None and SOURCE_OPEN.match(line.strip()):
+                excerpt = number
+                continue
+            if excerpt is not None:
+                if SOURCE_CLOSE.match(line.strip()):
+                    excerpt = None
+                else:
+                    excerpts.append((number, line))
+                continue
         marker = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
         if marker:
             token, tail = marker.groups()
@@ -59,11 +77,19 @@ def prose_lines(text):
                 continue
         if fence is None:
             result.append((number, clean(line)))
-    return result, opening if fence else None
+    return result, opening if fence else None, excerpt, excerpts
 
 
-def check(text):
-    lines, unclosed = prose_lines(text)
+def image_targets(lines):
+    for number, line in lines:
+        visible = re.sub(r"(`+).*?\1", "", line)
+        for match in IMAGE.finditer(visible):
+            yield number, next(g for g in match.groups() if g)
+
+
+def check(text, base=None):
+    """`base` is the draft's folder; relative image paths are resolved against it."""
+    lines, unclosed, unclosed_excerpt, excerpts = prose_lines(text)
     findings = []
 
     def add(code, number, detail):
@@ -73,6 +99,16 @@ def check(text):
         add("empty_draft", 1, "教学稿为空。")
     if unclosed:
         add("unclosed_fence", unclosed, "代码围栏没有闭合，无法可靠检查后文。")
+    if unclosed_excerpt:
+        add("unclosed_source_excerpt", unclosed_excerpt, "原文摘录缺少结束行 <!-- /原文 -->，后文都会被当作摘录跳过。")
+    for number, target in image_targets(lines + excerpts):
+        if re.match(r"^[a-z][a-z0-9+.-]*:", target, re.IGNORECASE) and not target.lower().startswith("file:"):
+            continue  # Remote or data URIs cannot be checked offline.
+        path = Path(unquote(target.removeprefix("file://")))
+        if path.is_absolute() or target.startswith("~"):
+            add("image_absolute_path", number, "图片用了绝对路径，文档换个位置就打不开；改用相对路径：" + target)
+        elif base is not None and not (Path(base) / path).is_file():
+            add("missing_image", number, "图片文件不存在：" + target)
     meaningful = [(n, s) for n, s in lines if s]
     progress = [(n, s) for n, s in meaningful if PROGRESS.match(s)]
     if not progress:
@@ -136,7 +172,7 @@ def check(text):
         "status": "mechanical_findings" if findings else "no_mechanical_findings",
         "draft_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         "semantic_compliance": "not_assessed",
-        "scope": "固定措辞、问号位置、思考题标签与非空性、代码围栏、末尾进度行；不验证内容含义。",
+        "scope": "固定措辞、问号位置、思考题标签与非空性、代码围栏、原文摘录标记、图片路径、末尾进度行；不验证内容含义。",
         "findings": findings,
     }
 
@@ -146,7 +182,7 @@ def main():
     parser.add_argument("draft", type=Path, help="UTF-8 Markdown lesson draft")
     args = parser.parse_args()
     try:
-        report = check(args.draft.read_text(encoding="utf-8"))
+        report = check(args.draft.read_text(encoding="utf-8"), args.draft.parent)
     except (OSError, UnicodeError) as exc:
         print(json.dumps({"status": "check_error", "error": str(exc)}, ensure_ascii=False))
         return 2

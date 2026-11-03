@@ -7,6 +7,7 @@
 - 思考题在同一条回复里直接给出分析和答案；
 - 分阶段讲完整个流程，每轮以进度行收尾。
 - 给它资料、要求做成多个文件的学习文档时，主会话把任务分步，每一步交给一个新的子会话写，自己负责检查每个文件和维护交接记录。
+- 学习文档引用资料里的图、原话、表格或代码时，直接把图片和原文放进文档，学习者不用再翻原资料。
 
 ## 目录结构
 
@@ -19,7 +20,7 @@ zero-basics-tutor/
 │   └── multi-step-documents.md # 按资料分步做多份学习文档：交接记录格式和子会话任务模板
 ├── scripts/
 │   ├── check_lesson.py         # 检查候选稿中的已覆盖形式问题
-│   ├── pdf_outline.py          # 列出 PDF 每页的标题、文字量和需要看图的页，供主会话规划
+│   ├── pdf_outline.py          # 列出 PDF 每页的标题、文字量和需要看图的页，并可把这些页存成图片
 │   └── test_check_lesson.py    # 检查器自身测试，不是模型遵循率测试
 ├── agents/
 │   └── openai.yaml             # Codex / OpenAI 智能体的界面配置
@@ -69,8 +70,9 @@ git clone https://github.com/Fingxing2025/zero-basics-tutor.git ~/.claude/skills
 ```bash
 python3 scripts/check_lesson.py /绝对路径/draft.md
 python3 scripts/test_check_lesson.py
+python3 scripts/pdf_outline.py --images 学习文档/图片 资料.pdf   # 需要 poppler
 ```
 
-退出码 0 表示没有发现当前脚本覆盖的形式问题；1 表示有发现；2 表示输入或执行失败。报告中的 `draft_sha256` 是识别所检查文本的摘要，正文一旦变化就需要重查。`semantic_compliance: not_assessed` 表示脚本没有评估内容含义。完整执行流程还需要按照 `references/release-review.md` 审阅概念、解释顺序、例子和进度。没有工具时只能进行文本审阅，不得声称自动检查已执行。
+退出码 0 表示没有发现当前脚本覆盖的形式问题；1 表示有发现；2 表示输入或执行失败。检查器跳过 `<!-- 原文 -->` 和 `<!-- /原文 -->` 之间的资料原文摘录，并检查嵌入的图片能否按相对路径打开。报告中的 `draft_sha256` 是识别所检查文本的摘要，正文一旦变化就需要重查。`semantic_compliance: not_assessed` 表示脚本没有评估内容含义。完整执行流程还需要按照 `references/release-review.md` 审阅概念、解释顺序、例子和进度。没有工具时只能进行文本审阅，不得声称自动检查已执行。
 
 这些流程能帮助减少遗漏，不能保证模型百分之百遵循。当前文件本身不能拦截聊天输出；需要外部应用实际接入检查流程，才能在展示前由程序阻止检查失败的稿件。检查器测试通过不等于教学效果或多轮模型测试通过。

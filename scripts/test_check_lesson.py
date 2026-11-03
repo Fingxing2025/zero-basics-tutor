@@ -100,6 +100,30 @@ class CheckerTests(unittest.TestCase):
     def test_english_feedback_request(self):
         self.assertIn("feedback_dependency", self.codes("Let me know if you understand.\n[Progress] Covered: mean."))
 
+    def test_source_excerpt_is_not_teacher_prose(self):
+        excerpt = "<!-- 原文 -->\n> 什么是系统调用？课后练习：写出 read 的返回值。\n<!-- /原文 -->\n"
+        self.assertEqual(self.codes(excerpt + LESSON), set())
+
+    def test_teacher_prose_after_excerpt_still_checked(self):
+        excerpt = "<!-- 原文 -->\n什么是系统调用？\n<!-- /原文 -->\n懂了吗？\n"
+        self.assertIn("comprehension_check", self.codes(excerpt + LESSON))
+
+    def test_unclosed_excerpt(self):
+        self.assertIn("unclosed_source_excerpt", self.codes("<!-- 原文 -->\n原文内容\n" + LESSON))
+
+    def test_image_paths(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "图片").mkdir()
+            (Path(folder) / "图片" / "第 8 页.png").write_bytes(b"")
+            ok = "![第 8 页的状态图](<图片/第 8 页.png>)\n" + LESSON
+            self.assertEqual({f["code"] for f in check(ok, folder)["findings"]}, set())
+            missing = "![状态图](图片/p09.png)\n" + LESSON
+            self.assertIn("missing_image", {f["code"] for f in check(missing, folder)["findings"]})
+            absolute = '<img src="/Users/me/p08.png">\n' + LESSON
+            self.assertIn("image_absolute_path", {f["code"] for f in check(absolute, folder)["findings"]})
+            literal = "`![状态图](图片/p09.png)` 是图片的写法。\n" + LESSON
+            self.assertEqual({f["code"] for f in check(literal, folder)["findings"]}, set())
+
     def test_empty_input_fails(self):
         self.assertIn("empty_draft", self.codes(""))
 
@@ -114,6 +138,9 @@ class CheckerTests(unittest.TestCase):
             draft.write_text("懂了吗？", encoding="utf-8")
             bad = subprocess.run([sys.executable, str(script), str(draft)], capture_output=True, text=True)
             self.assertEqual(bad.returncode, 1)
+            draft.write_text("![图](图片/没有.png)\n" + LESSON, encoding="utf-8")
+            image = subprocess.run([sys.executable, str(script), str(draft)], capture_output=True, text=True)
+            self.assertEqual(image.returncode, 1)
             missing = subprocess.run([sys.executable, str(script), str(Path(folder) / "missing.md")], capture_output=True, text=True)
             self.assertEqual(missing.returncode, 2)
 
