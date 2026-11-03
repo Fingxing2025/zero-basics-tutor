@@ -19,6 +19,7 @@ zero-basics-tutor/
 │   └── multi-step-documents.md # 按资料分步做多份学习文档：交接记录格式和子会话任务模板
 ├── scripts/
 │   ├── check_lesson.py         # 检查候选稿中的已覆盖形式问题
+│   ├── pdf_outline.py          # 列出 PDF 每页的标题、文字量和需要看图的页，供主会话规划
 │   └── test_check_lesson.py    # 检查器自身测试，不是模型遵循率测试
 ├── agents/
 │   └── openai.yaml             # Codex / OpenAI 智能体的界面配置
