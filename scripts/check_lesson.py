@@ -5,6 +5,13 @@ Exit 0: no covered mechanical findings; 1: findings; 2: input/check error.
 The caller must still review meaning, prerequisites, coverage and continuity.
 Source excerpts between `<!-- 原文 -->` and `<!-- /原文 -->` lines are quoted
 material, not teacher prose, so wording checks skip them.
+
+Claims (degree words such as 严重/大部分/浪费 and ratio numbers such as 90%/九成)
+must each be backed by an entry in the sidecar evidence file `<draft stem>.evidence.md`
+next to the draft:  - 「九成」｜实测｜条件：……；只说明……
+Allowed sources: 实测, 推演, 通常说法-已核实, 通常说法-未核实 (the last one only if
+the lesson itself says it was not verified). The checker counts entries, it cannot
+judge whether the evidence is true.
 """
 
 import argparse
@@ -27,6 +34,18 @@ KINDS = {
 SOURCE_OPEN = re.compile(r"^<!--\s*(?:原文|source)\s*-->$", re.IGNORECASE)
 SOURCE_CLOSE = re.compile(r"^<!--\s*/(?:原文|source)\s*-->$", re.IGNORECASE)
 IMAGE = re.compile(r"!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^)\s]+))|<img\s[^>]*src=[\"']([^\"']+)[\"']", re.IGNORECASE)
+CLAIM = re.compile(
+    r"严重|很大(?!的(?:整数|数))|巨大|大量|大部分|绝大(?:多数|部分)|几乎(?:全部|所有)|大幅|显著|浪费|"
+    r"小优化|微不足道|无关紧要|影响不大|最关键|最重要|主要原因|根本原因|关键原因|"
+    r"\d+(?:\.\d+)?\s*[%％]|百分之[\d一二三四五六七八九十百]+|[一二三四五六七八九十两]成(?![为了功立])|"
+    r"\d+(?:\.\d+)?\s*倍|[两三四五六七八九十百千]倍|"
+    r"\b(?:severe(?:ly)?|huge|massive|most of|the vast majority|negligible|wast(?:e|es|ed|ing)|"
+    r"main reason|root cause|\d+(?:\.\d+)?\s*(?:x|times))\b",
+    re.IGNORECASE,
+)
+EVIDENCE = re.compile(r"[「\[]([^」\]]+)[」\]]\s*[｜|]\s*([^｜|]+?)\s*[｜|]\s*(\S.*)")
+SOURCES = {"实测", "推演", "通常说法-已核实", "通常说法-未核实",
+           "measured", "derived", "common-verified", "common-unverified"}
 PROGRESS = re.compile(r"^(?:【进度】|\[Progress\]|【Progress】)", re.IGNORECASE)
 BANNED = [
     ("comprehension_check", r"懂了吗|明白了吗|这样清楚吗|有哪里不懂吗|能跟上吗|注意到了吗|你发现了吗|是不是很神奇|对吧[？?]"),
@@ -87,8 +106,30 @@ def image_targets(lines):
             yield number, next(g for g in match.groups() if g)
 
 
-def check(text, base=None):
-    """`base` is the draft's folder; relative image paths are resolved against it."""
+def read_evidence(path):
+    """Return ({claim text: count}, problems) from the sidecar evidence file."""
+    counts, problems = {}, []
+    if path is None or not Path(path).is_file():
+        return counts, problems
+    for number, raw in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        match = EVIDENCE.search(raw)
+        if not match:
+            continue
+        claim, source, basis = (g.strip() for g in match.groups())
+        if source not in SOURCES:
+            problems.append((number, "依据文件第 %d 行的来源“%s”不在允许范围：%s" % (number, source, "、".join(sorted(SOURCES)))))
+            continue
+        if len(basis) < 6:
+            problems.append((number, "依据文件第 %d 行的依据说明太短，写清条件和能证明什么。" % number))
+            continue
+        key = re.sub(r"\s+", "", claim).lower()
+        counts[key] = counts.get(key, 0) + 1
+    return counts, problems
+
+
+def check(text, base=None, evidence=None):
+    """`base` is the draft's folder; relative image paths are resolved against it.
+    `evidence` is the sidecar evidence file (may not exist)."""
     lines, unclosed, unclosed_excerpt, excerpts = prose_lines(text)
     findings = []
 
@@ -168,11 +209,27 @@ def check(text, base=None):
             if re.search(pattern, visible, re.IGNORECASE):
                 add(code, number, "发现需修订或结合上下文审阅的措辞：" + visible[:160])
     finish()
+
+    claims = []
+    for number, line in lines:
+        visible = re.sub(r"(`+).*?\1", "", line)
+        for match in CLAIM.finditer(visible):
+            claims.append((number, re.sub(r"\s+", "", match.group(0)).lower(), visible))
+    backed, problems = read_evidence(evidence)
+    for number, detail in problems:
+        add("evidence_invalid", number, detail)
+    used = {}
+    for number, key, visible in claims:
+        used[key] = used.get(key, 0) + 1
+        if used[key] > backed.get(key, 0):
+            add("claim_without_evidence", number,
+                "程度判断或比例数字“%s”没有对应依据；先核实，再在 %s 里写一行 - 「%s」｜来源｜依据，或者删改这句：%s"
+                % (key, Path(evidence).name if evidence else "<稿件名>.evidence.md", key, visible[:120]))
     return {
         "status": "mechanical_findings" if findings else "no_mechanical_findings",
         "draft_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         "semantic_compliance": "not_assessed",
-        "scope": "固定措辞、问号位置、思考题标签与非空性、代码围栏、原文摘录标记、图片路径、末尾进度行；不验证内容含义。",
+        "scope": "固定措辞、问号位置、思考题标签与非空性、代码围栏、原文摘录标记、图片路径、末尾进度行、程度判断与比例数字是否登记了依据；不验证内容含义，也不验证依据真假。",
         "findings": findings,
     }
 
@@ -182,7 +239,8 @@ def main():
     parser.add_argument("draft", type=Path, help="UTF-8 Markdown lesson draft")
     args = parser.parse_args()
     try:
-        report = check(args.draft.read_text(encoding="utf-8"), args.draft.parent)
+        evidence = args.draft.with_name(args.draft.stem + ".evidence.md")
+        report = check(args.draft.read_text(encoding="utf-8"), args.draft.parent, evidence)
     except (OSError, UnicodeError) as exc:
         print(json.dumps({"status": "check_error", "error": str(exc)}, ensure_ascii=False))
         return 2

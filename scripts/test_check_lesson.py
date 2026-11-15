@@ -144,6 +144,49 @@ class CheckerTests(unittest.TestCase):
             missing = subprocess.run([sys.executable, str(script), str(Path(folder) / "missing.md")], capture_output=True, text=True)
             self.assertEqual(missing.returncode, 2)
 
+    def test_claim_needs_evidence(self):
+        text = "原来的写法浪费了九成 CPU 时间。\n" + PROGRESS
+        self.assertIn("claim_without_evidence", self.codes(text))
+
+    def test_claim_backed_by_evidence(self):
+        text = "原来的写法让 CPU 空转了九成时间。\n" + PROGRESS
+        with tempfile.TemporaryDirectory() as folder:
+            ev = Path(folder) / "draft.evidence.md"
+            ev.write_text("- 「九成」｜实测｜alarm-multiple 中所有线程都在等待，只说明空闲时间被空转占用\n", encoding="utf-8")
+            self.assertEqual({f["code"] for f in check(text, folder, ev)["findings"]}, set())
+
+    def test_each_occurrence_needs_entry(self):
+        text = "第一处很严重。\n第二处也很严重。\n" + PROGRESS
+        with tempfile.TemporaryDirectory() as folder:
+            ev = Path(folder) / "draft.evidence.md"
+            ev.write_text("- 「严重」｜推演｜对照 thread.c 第 497 行推出会挡住低优先级线程\n", encoding="utf-8")
+            found = [f for f in check(text, folder, ev)["findings"] if f["code"] == "claim_without_evidence"]
+            self.assertEqual([f["line"] for f in found], [2])
+
+    def test_evidence_source_must_be_known(self):
+        text = "差了 3 倍。\n" + PROGRESS
+        with tempfile.TemporaryDirectory() as folder:
+            ev = Path(folder) / "draft.evidence.md"
+            ev.write_text("- 「3倍」｜我觉得｜印象里差不多是这样的数字\n", encoding="utf-8")
+            codes = {f["code"] for f in check(text, folder, ev)["findings"]}
+            self.assertIn("evidence_invalid", codes)
+            self.assertIn("claim_without_evidence", codes)
+
+    def test_claims_in_code_and_excerpt_ignored(self):
+        text = "<!-- 原文 -->\n浪费 90% 资源\n<!-- /原文 -->\n这段代码是 `waste_90%`。\n" + PROGRESS
+        self.assertNotIn("claim_without_evidence", self.codes(text))
+
+    def test_cli_reads_sidecar_evidence(self):
+        script = Path(__file__).with_name("check_lesson.py")
+        with tempfile.TemporaryDirectory() as folder:
+            draft = Path(folder) / "draft.md"
+            draft.write_text("影响不大。\n" + PROGRESS, encoding="utf-8")
+            bad = subprocess.run([sys.executable, str(script), str(draft)], capture_output=True, text=True)
+            self.assertEqual(bad.returncode, 1)
+            (Path(folder) / "draft.evidence.md").write_text("- 「影响不大」｜实测｜总时间 585 与 597 tick，相差在波动范围内\n", encoding="utf-8")
+            good = subprocess.run([sys.executable, str(script), str(draft)], capture_output=True, text=True)
+            self.assertEqual(good.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
