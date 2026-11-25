@@ -1,4 +1,4 @@
 interface:
   display_name: "零基础教学"
-  short_description: "从零讲到学习目标，只需阅读，不考查，思考题附分析和答案；也能按资料写学习文档"
-  default_prompt: "使用 $zero-basics-tutor 从零教我指定主题，让我只需阅读完整讲解；主动补足陌生概念，不试探掌握程度，思考题紧接分析和答案，并完成整个教学流程。"
+  short_description: "从具体题目或问题进去，只补用到的知识，配图讲清并解出来；适合考前临时学"
+  default_prompt: "使用 $zero-basics-tutor 讲解我给的题目或主题：从具体问题进去，只补用到的知识，陌生词就地解释，能画图就画图，最后把问题解出来。"
